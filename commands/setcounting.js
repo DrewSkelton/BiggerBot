@@ -17,9 +17,12 @@ module.exports = {
     }
     
     // Set the current channel as the counting channel
-    countingFeature.setCountingChannel(message.channel.id);
-    countingFeature.resetCount(); // Reset count to 0
-    
-    return message.reply('✅ This channel has been set as the counting channel! Start counting from 1.');
+    if (countingFeature.setCountingChannel(message.channel.id)) {
+      message.reply('✅ This channel has been set as a counting channel! Start counting from 1.');
+    }
+
+    else {
+      message.reply('❌ This channel has been removed as a counting channel.');
+    }
   },
 };

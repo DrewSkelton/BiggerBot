@@ -1,32 +1,17 @@
-const fs = require('fs');
-const path = require('path');
+const database = require('../utils/database');
 
 module.exports = {
   name: 'counting',
   description: 'Manages a counting channel where users count up one by one using numbers, Roman numerals, or math expressions',
   featureIcon: '🔢',
   
-  // Current count storage
-  currentCount: 0,
-  lastUserId: null, // Track the last user who counted
-  dataFile: path.join(__dirname, '../data/counting.json'),
-  settingsFile: path.join(__dirname, '../data/countingSettings.json'),
-  
-  init(client) {
-    // Ensure data directory exists
-    const dataDir = path.join(__dirname, '../data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    
-    // Load settings and current count from files
-    this.loadSettings();
-    this.loadCount();
-    
+  async init(client) {
     client.on('messageCreate', (message) => {
+      // Load settings and current count from files
+      let data = database.load(['counting', message.channelId])
+
       // Skip if counting channel isn't set or message is in a different channel
-      if (!this.countingChannelId || message.channelId !== this.countingChannelId) return;
-      if (message.author.bot) return;
+      if (data === undefined || message.author.bot) return;
       
       // Get the content of the message
       const content = message.content.trim();
@@ -57,14 +42,14 @@ module.exports = {
       if (number === null) {
         return;
       }
+
+      //const currentCount = data.currentCount;
+      //const lastUserId = data.lastUserId;
       
       // Check if the same user is trying to count twice in a row
-      if (message.author.id === this.lastUserId) {
-        // Store the current count before resetting it
-        const previousCount = this.currentCount;
-        
+      if (message.author.id === data.lastUserId) {
         message.react('❌');
-        message.channel.send(`<@${message.author.id}> tried to count twice in a row! The count has been reset from ${previousCount} to 0.`);
+        message.channel.send(`<@${message.author.id}> tried to count twice in a row! The count has been reset from ${data.currentCount} to 0.`);
         
         try {
             const guild = message.guild;
@@ -78,24 +63,19 @@ module.exports = {
             console.error('Error getting member nickname:', error);
         }
         // Reset the count after sending the message
-        this.currentCount = 0;
-        this.lastUserId = null;
-        this.saveCount();
+        this.resetCount(message.channel.id)
         return;
       }
       
       // Check if the number is the next in sequence
-      if (number === this.currentCount + 1) {
-        this.currentCount = number;
-        this.lastUserId = message.author.id; // Update the last user
-        this.saveCount();
+      if (number === data.currentCount + 1) {
+        data.currentCount = number;
+        data.lastUserId = lastUserId;
+        database.save(['counting', message.channel.id], data);
         message.react('✅');
       } else {
-        // Store the current count before resetting it
-        const previousCount = this.currentCount;
-        
         message.react('❌');
-        message.channel.send(`Counting failed at ${previousCount}! The next number should have been ${previousCount + 1}. Starting over from 0.`);
+        message.channel.send(`Counting failed! The number was ${number} but should have been ${data.currentCount + 1}. Starting over from 0.`);
         
         // Get the user who messed up and use their nickname if available
         try {
@@ -111,9 +91,7 @@ module.exports = {
         }
         
         // Reset the count after sending the message
-        this.currentCount = 0;
-        this.lastUserId = null; // Reset last user
-        this.saveCount();
+        this.resetCount(message.channel.id)
       }
     });
     
@@ -173,65 +151,22 @@ module.exports = {
       return null;
     }
   },
-  
-  loadSettings() {
-    try {
-      if (fs.existsSync(this.settingsFile)) {
-        const settings = JSON.parse(fs.readFileSync(this.settingsFile, 'utf8'));
-        this.countingChannelId = settings.channelId || null;
-      } else {
-        this.countingChannelId = null;
-      }
-    } catch (error) {
-      console.error('Error loading counting settings:', error);
-      this.countingChannelId = null;
-    }
-  },
-  
-  saveSettings() {
-    try {
-      fs.writeFileSync(this.settingsFile, JSON.stringify({ 
-        channelId: this.countingChannelId 
-      }), 'utf8');
-    } catch (error) {
-      console.error('Error saving counting settings:', error);
-    }
-  },
-  
-  loadCount() {
-    try {
-      if (fs.existsSync(this.dataFile)) {
-        const data = JSON.parse(fs.readFileSync(this.dataFile, 'utf8'));
-        this.currentCount = data.count || 0;
-        this.lastUserId = data.lastUserId || null;
-      }
-    } catch (error) {
-      console.error('Error loading count:', error);
-      this.currentCount = 0;
-      this.lastUserId = null;
-    }
-  },
-  
-  saveCount() {
-    try {
-      fs.writeFileSync(this.dataFile, JSON.stringify({ 
-        count: this.currentCount,
-        lastUserId: this.lastUserId
-      }), 'utf8');
-    } catch (error) {
-      console.error('Error saving count:', error);
-    }
+
+  resetCount(channelId) {
+    database.save(['counting', channelId], {currentCount: 0, lastUserId: null})
   },
   
   setCountingChannel(channelId) {
-    this.countingChannelId = channelId;
-    this.saveSettings();
-    return true;
+    let data = database.load(['counting']);
+    const channelExists = (channelId in data)
+    if (!channelExists) {
+      data[channelId] = {currentCount: 0, lastUserId: null};
+    }
+
+    else {
+      data[channelId] = undefined;
+    }
+    database.save(['counting'], data);
+    return !channelExists;
   },
-  
-  resetCount() {
-    this.currentCount = 0;
-    this.lastUserId = null;
-    this.saveCount();
-  }
 };
